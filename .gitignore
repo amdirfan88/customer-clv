@@ -8,3 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+.DS_Store
+data/
+*.csv
+*.xlsx
+.DS_Store
+*.csv
+.ipynb_checkpoints/
