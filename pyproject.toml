@@ -9,6 +9,7 @@ dependencies = [
     "implicit>=0.7.3",
     "jupyter>=1.1.1",
     "lifetimes>=0.11.3",
+    "lightgbm>=4.7.0",
     "matplotlib>=3.11.0",
     "mlxtend>=0.25.0",
     "numpy>=2.5.0",
