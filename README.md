@@ -164,6 +164,16 @@ individual customer-level predictions remain uncertain. The model is therefore
 most useful for retention targeting, customer tiering, and marketing budget
 allocation rather than exact per-customer revenue forecasting.
 
+## Customer Lifetime Value Prediction
+
+The CLV model was evaluated using decile analysis by ranking customers according to their predicted lifetime value and comparing the mean predicted CLV with the mean actual CLV within each decile. The model successfully separates lower-value from higher-value customers, with the highest predicted decile capturing customers with substantially greater realized lifetime value. The close agreement between predicted and actual CLV across most deciles indicates that the model effectively captures customer-value ranking.
+
+<p align="center">
+  <img src="images/clv_decile_analysis.png" width="850">
+</p>
+
+*Figure: Mean actual and predicted customer lifetime value across predicted CLV deciles.*
+
 ## Product Recommendation Modeling
 
 `04_Product_reco.ipynb` builds several recommendation approaches:
