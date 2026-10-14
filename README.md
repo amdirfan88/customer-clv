@@ -38,7 +38,7 @@ The CLV estimates are most useful for ranking and segmenting customers rather th
 | `01_Cleaning.ipynb` | Cleans calibration and holdout transactions, handles returns/cancellations, removes non-product activity, and creates order-level datasets. |
 | `02_Purchase_Frequency.ipynb` | Fits a Pareto/NBD model to predict future purchase counts and customer activity. |
 | `03_CLV.ipynb` | Fits a Gamma-Gamma monetary-value model and combines it with purchase-frequency predictions to estimate CLV. |
-| `04_Product_reco.ipynb` | Builds and evaluates product recommendation models, including popularity, repeat purchase, market-basket, semantic, two-tower, and LightGBM ranking approaches. |
+| `04_product_reco.ipynb` | Builds and evaluates product recommendation models, including popularity, repeat purchase, market-basket, semantic, two-tower, and LightGBM ranking approaches. |
 
 ## Data Flow
 
@@ -56,7 +56,7 @@ The notebooks should be run in order:
         |      03_CLV.ipynb
         |
         v
-04_Product_reco.ipynb
+04_product_reco.ipynb
 ```
 
 ## Input Data
@@ -176,7 +176,7 @@ The CLV model was evaluated using decile analysis by ranking customers according
 
 ## Product Recommendation Modeling
 
-`04_Product_reco.ipynb` builds several recommendation approaches:
+`04_product_reco.ipynb` builds several recommendation approaches:
 
 | Model | Description |
 | --- | --- |
@@ -216,21 +216,129 @@ The notebooks use Python and common data science libraries, including:
 - `mlxtend`
 - `tqdm`
 
-Install the dependencies in a notebook environment before running the workflow.
+Python and Python-package dependencies are managed with **uv**. The project uses
+`pyproject.toml` to declare dependencies, `uv.lock` to record resolved versions,
+and `.python-version` to select Python 3.12. From the project directory, run
+`uv sync` to create `.venv`, download the required Python version if needed, and
+install the locked packages. See the [uv documentation](https://docs.astral.sh/uv/concepts/projects/sync/).
+
+System-level prerequisites are **Git**, **uv**, and a **C++ compiler** for normal
+PyMC/PyTensor compiled execution. These tools must be installed separately;
+`uv.lock` manages Python packages, not operating-system tools.
+
+### Windows Setup
+
+Run these commands in **Windows PowerShell**.
+
+1. **Install Git:**
+
+   ```powershell
+   winget install --id Git.Git -e --source winget
+   ```
+
+   Close and reopen PowerShell, then verify:
+
+   ```powershell
+   git --version
+   ```
+
+2. **Install uv:**
+
+   ```powershell
+   winget install --id astral-sh.uv -e
+   ```
+
+   Close and reopen PowerShell, then verify:
+
+   ```powershell
+   uv --version
+   ```
+
+3. **Install a C++ compiler for PyTensor:** The Pareto/NBD and Gamma-Gamma
+   models use PyMC/PyTensor. The Windows setup tested for this repository uses
+   WinLibs GCC/G++:
+
+   ```powershell
+   winget install --id BrechtSanders.WinLibs.POSIX.UCRT -e
+   ```
+
+   Close and reopen PowerShell, then verify:
+
+   ```powershell
+   g++ --version
+   ```
+
+4. **Clone the repository:** First navigate to the parent directory where you
+   want to keep your GitHub projects, then run:
+
+   ```powershell
+   git clone https://github.com/amdirfan88/customer-clv.git
+   cd customer-clv
+   ```
+
+5. **Reproduce the Python environment:** From inside `customer-clv`, run:
+
+   ```powershell
+   uv sync
+   ```
+
+   This creates the project's virtual environment and installs the required
+   Python version and packages using the project configuration and lockfile.
+
+6. **Start JupyterLab:** From inside `customer-clv`, run:
+
+   ```powershell
+   uv run jupyter lab
+   ```
+
+### Windows PyTensor Troubleshooting
+
+PyTensor dynamically compiles native modules during model fitting. If an error
+contains `An Application Control policy has blocked this file`, Windows Smart
+App Control / Application Control may be blocking a generated compiled module.
+
+Review **Windows Security → App & browser control → Smart App Control settings**.
+Read the Windows warning before changing the setting: depending on your Windows
+configuration, turning Smart App Control off may not be reversible without
+resetting or reinstalling Windows. See [Microsoft's Smart App Control FAQ](https://support.microsoft.com/en-us/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions).
+This is troubleshooting guidance, not a required installation step.
+
+### macOS Setup
+
+The project has also been tested on macOS. Ensure Git and
+[uv](https://docs.astral.sh/uv/getting-started/installation/) are installed and a
+C++ compiler is available. In the tested macOS environment, PyTensor uses
+Apple's `clang++`; verify it in Terminal with:
+
+```bash
+clang++ --version
+```
+
+In Terminal, navigate to your preferred parent directory, then run:
+
+```bash
+git clone https://github.com/amdirfan88/customer-clv.git
+cd customer-clv
+uv sync
+uv run jupyter lab
+```
+Run `uv sync` and `uv run jupyter lab` from inside `customer-clv`.
 
 ## How to Run
 
-Run the notebooks in this order:
+After completing the setup above, open the notebooks in JupyterLab and run all
+cells in each notebook in this order:
 
 1. `00_Create_case_study_data.ipynb`
 2. `01_Cleaning.ipynb`
 3. `02_Purchase_Frequency.ipynb`
 4. `03_CLV.ipynb`
-5. `04_Product_reco.ipynb`
+5. `04_product_reco.ipynb`
 
-The first notebook creates the initial data split and product catalogs. The
-second notebook creates the cleaned working datasets required by the later
-modeling notebooks.
+Keep JupyterLab running from the project directory so relative data paths
+resolve correctly. The first notebook downloads the raw dataset and requires
+internet access. See [Data Flow](#data-flow) and [Project Structure](#project-structure)
+for the notebook dependencies and purposes.
 
 ## Key Takeaways
 

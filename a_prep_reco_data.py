@@ -1336,9 +1336,7 @@ def recommend_2Tower(
     trained_model,
     stockcode_to_index,
     index_to_stockcode,
-    pad_embed_index,
-    customer_id_to_matrix_index,
-    product_code_to_matrix_index
+    pad_embed_index
 ):
 
     df_history = df_history.dropna(subset=["Customer_ID"]).copy()
@@ -1448,27 +1446,29 @@ def recommend_2Tower(
             ).numpy()
             task_progress.update(1)
 
-    future_product_indices = [
-        stockcode_to_index[product_code]
-        for product_code in product_code_to_matrix_index
-    ]
-    number_of_products = len(product_code_to_matrix_index)
+    index_to_customer_id = {
+        cust_index: customer_id
+        for customer_id, cust_index in customer_id_to_index.items()
+    }
+    matrix_product_codes = df_catalog_future['StockCode'].dropna().astype(str).drop_duplicates().tolist()
+    index_to_matrix_product_code = dict(enumerate(matrix_product_codes))
+    matrix_product_embed_indices = [stockcode_to_index[product] for product in matrix_product_codes]
+    number_of_products = len(matrix_product_codes)
     rank_dtype = np.uint16 if number_of_products <= np.iinfo(np.uint16).max else np.uint32
-    two_tower_ranks = np.zeros(
-        (len(customer_id_to_matrix_index), len(product_code_to_matrix_index)),
+    two_tower_ranks = np.full(
+        (len(customer_id_list), number_of_products),
+        number_of_products,
         dtype=rank_dtype,
     )
 
-    for cust_index in tqdm(customer_indices, desc='Scoring two-tower recommendations', unit="customer", leave=False):
-        customer_id = customer_id_list[cust_index]
+    for cust_index in tqdm(customer_indices, desc='Ranking two-tower recommendations', unit="customer", leave=False):
         scores = product_latent @ tower1_output[cust_index]
-        ranked_product_indices = np.argsort(-scores[future_product_indices], kind='stable')
-        two_tower_ranks[customer_id_to_matrix_index[customer_id], ranked_product_indices] = np.arange(
-            1, number_of_products + 1, dtype=rank_dtype,
+        top_product_indices = np.argsort(-scores[matrix_product_embed_indices], kind='stable')[:1000]
+        two_tower_ranks[cust_index, top_product_indices] = np.arange(
+            1, len(top_product_indices) + 1, dtype=rank_dtype,
         )
-        two_tower_ranks[customer_id_to_matrix_index[customer_id], ranked_product_indices[1000:]] = number_of_products
 
-    return two_tower_ranks
+    return two_tower_ranks, index_to_customer_id, index_to_matrix_product_code
 
 # ==========================================================
 # Preparing training data
@@ -1514,69 +1514,68 @@ df_future1 = df_calib1[
     df_catalog_all, EPOCHS = 4, dim_layer_2=700, dim_layer_3=700 
 )
 
-# Shared matrix indices: rows are cleaned calibration customers; columns are holdout products.
-with tqdm(total=1, desc='Creating score-matrix index maps', unit="task", leave=False) as task_progress:
-    matrix_customer_ids = sorted(df_calib['Customer_ID'].dropna().astype('int64').unique().tolist())
-    matrix_product_codes = df_catalog_holdout['StockCode'].dropna().astype(str).drop_duplicates().tolist()
-    index_to_matrix_customer_id = dict(enumerate(matrix_customer_ids))
-    index_to_matrix_product_code = dict(enumerate(matrix_product_codes))
-    customer_id_to_matrix_index = {customer_id: index for index, customer_id in index_to_matrix_customer_id.items()}
-    product_code_to_matrix_index = {product_code: index for index, product_code in index_to_matrix_product_code.items()}
-    index_maps = {
-        'index_to_customer_id': index_to_matrix_customer_id,
-        'index_to_stockcode': index_to_matrix_product_code,
-    }
-    task_progress.update(1)
-
+parquet_path = 'data/working_data/two_tower_ranks.parquet'
 maps_path = 'data/working_data/recommendation_index_maps.pkl'
-if os.path.exists(maps_path):
-    with open(maps_path, 'rb') as file:
-        assert pickle.load(file) == index_maps, 'Existing index maps do not match the current customers and products.'
-else:
-    with open(maps_path, 'wb') as file:
-        pickle.dump(index_maps, file, protocol=pickle.HIGHEST_PROTOCOL)
-
-two_tower_ranks_path = 'data/working_data/two_tower_ranks.parquet'
-if not os.path.exists(two_tower_ranks_path):
-    two_tower_ranks = recommend_2Tower(
+if not os.path.exists(parquet_path) or not os.path.exists(maps_path):
+    two_tower_ranks, index_to_matrix_customer_id, index_to_matrix_product_code = recommend_2Tower(
         df_calib,
         df_catalog_holdout,
         df_catalog_all,
         trained_model,
         stockcode_to_index,
         index_to_stockcode,
-        pad_embed_index,
-        customer_id_to_matrix_index,
-        product_code_to_matrix_index,
+        pad_embed_index
     )
-    with tqdm(total=1, desc='Saving two-tower rank matrix', unit="task", leave=False) as task_progress:
-        pd.DataFrame(
-            two_tower_ranks,
-            columns=[str(index) for index in range(two_tower_ranks.shape[1])],
-        ).to_parquet(two_tower_ranks_path, index=False, compression='zstd', use_dictionary=False)
-        task_progress.update(1)
+    index_maps = {
+        'index_to_customer_id': index_to_matrix_customer_id,
+        'index_to_stockcode': index_to_matrix_product_code,
+    }
+    if os.path.exists(maps_path):
+        with open(maps_path, 'rb') as file:
+            assert pickle.load(file) == index_maps, 'Existing index maps do not match the rank matrix.'
+    else:
+        with open(maps_path, 'wb') as file:
+            pickle.dump(index_maps, file, protocol=pickle.HIGHEST_PROTOCOL)
+    if not os.path.exists(parquet_path):
+        with tqdm(total=1, desc='Saving two-tower rank matrix', unit="task", leave=False) as task_progress:
+            pd.DataFrame(
+                two_tower_ranks,
+                columns=[str(index) for index in range(two_tower_ranks.shape[1])],
+            ).to_parquet(parquet_path, index=False, compression='zstd', use_dictionary=False)
+            task_progress.update(1)
     del two_tower_ranks
 
-ranks_path = 'data/working_data/repeat_purchase_ranks.parquet'
-if not os.path.exists(ranks_path):
+
+repeat_ranks_path = 'data/working_data/repeat_purchase_ranks.parquet'
+if not os.path.exists(repeat_ranks_path):
+    with open(maps_path, 'rb') as file:
+        repeat_index_maps = pickle.load(file)
+    repeat_customer_rows = {
+        customer_id: index
+        for index, customer_id in repeat_index_maps['index_to_customer_id'].items()
+    }
+    repeat_product_columns = {
+        stockcode: index
+        for index, stockcode in repeat_index_maps['index_to_stockcode'].items()
+    }
     ranked_repeat, repeat_ranks = repeat_model(df_calib, df_catalog_calib, df_catalog_holdout)
-    number_of_products = len(product_code_to_matrix_index)
+    number_of_products = len(repeat_product_columns)
     maximum_rank = max((len(products) for products in ranked_repeat.values()), default=0)
     rank_dtype = np.uint16 if max(number_of_products, maximum_rank) <= np.iinfo(np.uint16).max else np.uint32
     repeat_purchase_ranks = np.full(
-        (len(customer_id_to_matrix_index), number_of_products),
+        (len(repeat_customer_rows), number_of_products),
         number_of_products,
         dtype=rank_dtype,
     )
     for customer_id, product_ranks in tqdm(repeat_ranks.items(), desc='Building repeat-purchase rank matrix', unit="customer", leave=False):
-        customer_index = customer_id_to_matrix_index[customer_id]
-        for product_code, rank in product_ranks.items():
-            if product_code in product_code_to_matrix_index:
-                repeat_purchase_ranks[customer_index, product_code_to_matrix_index[product_code]] = rank
+        customer_index = repeat_customer_rows[customer_id]
+        for stockcode, rank in product_ranks.items():
+            if stockcode in repeat_product_columns:
+                repeat_purchase_ranks[customer_index, repeat_product_columns[stockcode]] = rank
     with tqdm(total=1, desc='Saving repeat-purchase rank matrix', unit="task", leave=False) as task_progress:
         pd.DataFrame(
             repeat_purchase_ranks,
-            columns=[str(index) for index in range(repeat_purchase_ranks.shape[1])],
-        ).to_parquet(ranks_path, index=False, compression='zstd')
+            columns=[str(index) for index in range(number_of_products)],
+        ).to_parquet(repeat_ranks_path, index=False, compression='zstd')
         task_progress.update(1)
     del repeat_purchase_ranks, ranked_repeat, repeat_ranks
