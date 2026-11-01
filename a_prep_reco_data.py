@@ -11,6 +11,16 @@ from tqdm.auto import tqdm
 from collections import defaultdict
 from urllib.request import urlretrieve
 
+#from sentence_transformers import SentenceTransformer
+#from sklearn.cluster import KMeans, MiniBatchKMeans, AgglomerativeClustering
+#from sklearn.metrics import silhouette_score
+
+
+# Product recommendations from 04_Product_reco.ipynb
+
+import re
+
+
 print('Current working directory is', os.getcwd())
 
 # downloading and combining data from excel sheets
@@ -263,20 +273,6 @@ if not os.path.exists('data/given_data/prod_catalog_holdout.parquet'):
         df_product.to_parquet('data/given_data/prod_catalog_holdout.parquet', index=False)
         task_progress.update(1)
 
-import pandas as pd
-import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-#from tqdm import tqdm
-#import re
-import os
-#from tqdm.notebook import tqdm
-from tqdm.auto import tqdm
-from collections import defaultdict
-
-#from sentence_transformers import SentenceTransformer
-#from sklearn.cluster import KMeans, MiniBatchKMeans, AgglomerativeClustering
-#from sklearn.metrics import silhouette_score
 
 print('Current working directory is', os.getcwd())
 
@@ -687,19 +683,8 @@ if not os.path.exists('data/working_data/holdout_order.csv'):
         df_holdout_order.to_csv('data/working_data/holdout_order.csv', index=False)
         task_progress.update(1)
 
-# Product recommendations from 04_Product_reco.ipynb
 
-import pandas as pd
 
-import numpy as np
-
-import re
-
-import os
-
-from tqdm.auto import tqdm
-
-from collections import defaultdict
 
 with tqdm(total=1, desc='Importing sentence transformers', unit="task", leave=False) as task_progress:
     from sentence_transformers import SentenceTransformer
@@ -916,7 +901,9 @@ df_catalog_all = (
 df_catalog_all['short_description2'] = df_catalog_all['Description'].apply(short_descript_v2)
 
 with tqdm(total=1, desc='Loading MiniLM embedding model', unit="task", leave=False) as task_progress:
-    model = SentenceTransformer("all-MiniLM-L6-v2")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f'MiniLM embedding on: {torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU"}')
+    model = SentenceTransformer("all-MiniLM-L6-v2", device=str(device))
     task_progress.update(1)
 
 embeddings_short2 = model.encode(
@@ -1234,8 +1221,9 @@ def train_2Tower(
         product_embed_dim,
         dim_layer_2=dim_layer_2,
         dim_layer_3=dim_layer_3
-    )
-    
+    ).to(device)
+    print(f'Two-tower training on: {torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU"}')
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-5)
     criterion = nn.BCEWithLogitsLoss()
     # ==========================================================
@@ -1290,14 +1278,18 @@ def train_2Tower(
             # Convert the batch histories to tensors
             hist_products = torch.tensor(
                 hist_products_list,
-                dtype=torch.long
+                dtype=torch.long,
+                device=device
             )
-        
+
             hist_weights = torch.tensor(
                 hist_weights_list,
-                dtype=torch.float32
+                dtype=torch.float32,
+                device=device
             )
-        
+
+            prod_index_tensor = prod_index_tensor.to(device)
+
             optimizer.zero_grad()
 
             # calling forward function        
@@ -1307,7 +1299,7 @@ def train_2Tower(
                 hist_weights
             )
 
-            if_pos_tensor = if_pos_tensor.float()
+            if_pos_tensor = if_pos_tensor.float().to(device)
             loss = criterion(logits, if_pos_tensor)
         
             loss.backward()
@@ -1317,6 +1309,8 @@ def train_2Tower(
 
         avg_loss = total_loss / len(batch_for_train1ing.dataset)
         print(f"Training: epoch {epoch+1}/{EPOCHS} | loss = {avg_loss:.4f}")
+
+    model = model.cpu()
 
     return (
         model,
@@ -1477,15 +1471,8 @@ def recommend_2Tower(
 # Get unique customers
 all_customers = df_calib["Customer_ID"].dropna().unique().to_numpy()
 
-# Shuffle customers reproducibly
-np.random.seed(42)
-np.random.shuffle(all_customers)
-
-# Split customers into two sets
-split_point = len(all_customers) // 2
-
-
-customer_set1 = set(all_customers[:split_point])
+# Use all customers for training
+customer_set1 = set(all_customers)
 
 # Create calibration training dataset
 df_calib1 = df_calib[df_calib["Customer_ID"].isin(customer_set1)].copy()

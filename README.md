@@ -1,3 +1,12 @@
+The project has two parts:
+
+1. **Customer behavior analysis** (`00` to `04` notebooks): Customer Behavior modeling, and the evaluation of product
+   recommendation models. Most of this README describes this part.
+2. **Agentic product recommendation chatbot** (`a_prep_reco_data.py`,
+   `b_recommendation_agent.py`, `c_app.py`): turns the best recommendation models
+   into a conversational shopping assistant built with LangChain and LangGraph.
+   See [Agentic Product Recommendation Chatbot](#agentic-product-recommendation-chatbot).
+
 # Customer Behavior Prediction Case Study
 
 This project builds an end-to-end customer analytics workflow for a UK online
@@ -5,6 +14,7 @@ retailer. Starting from raw transaction lines, it prepares calibration and
 holdout datasets, cleans noisy retail data, predicts future purchase frequency,
 estimates customer lifetime value, and evaluates several product recommendation
 strategies.
+
 
 The business goal is to answer three practical questions:
 
@@ -23,9 +33,13 @@ history from a UK-based online retailer.
 | Zero-purchase prediction | ROC AUC: **0.748** |
 | Aggregate CLV | Predicted **6.86M** vs actual **6.67M** (**+2.94%**) |
 | Customer-level CLV | Pearson correlation: **0.913**; WAPE: **51.34%** |
-| All-product recommendation | Precision@10: **0.394**; NDCG@10: **0.436** |
-| New product recommendation | Precision@10: **0.112**; NDCG@10: **0.120** |
-| New-catalogue recommendation | Precision@10: **0.126**; NDCG@10: **0.139** |
+| All-product recommendation | Precision@10: **0.388**; NDCG@10: **0.428** |
+| New product recommendation | Precision@10: **0.113**; NDCG@10: **0.118** |
+| New-catalogue recommendation | Precision@10: **0.126**; NDCG@10: **0.138** |
+
+The recommendation results are from the combined LightGBM ranker trained on all
+customer-product pairs, with the two-tower model trained on a GPU. Exact values
+can shift slightly between runs and between GPU and CPU training.
 
 The CLV estimates are most useful for ranking and segmenting customers rather than forecasting each customer's exact spend. The recommendation rankers outperform global popularity, including on the more difficult new-product tasks.
 
@@ -38,7 +52,7 @@ The CLV estimates are most useful for ranking and segmenting customers rather th
 | `01_Cleaning.ipynb` | Cleans calibration and holdout transactions, handles returns/cancellations, removes non-product activity, and creates order-level datasets. |
 | `02_Purchase_Frequency.ipynb` | Fits a Pareto/NBD model to predict future purchase counts and customer activity. |
 | `03_CLV.ipynb` | Fits a Gamma-Gamma monetary-value model and combines it with purchase-frequency predictions to estimate CLV. |
-| `04_product_reco.ipynb` | Builds and evaluates product recommendation models, including popularity, repeat purchase, market-basket, semantic, two-tower, and LightGBM ranking approaches. |
+| `04_product_reco.ipynb` | Builds and evaluates product recommendation models, including popularity, repeat purchase, market-basket, semantic, two-tower, and LightGBM ranking approaches. It uses an NVIDIA GPU (CUDA) when one is available and otherwise runs on the CPU. |
 
 ## Data Flow
 
@@ -169,7 +183,7 @@ allocation rather than exact per-customer revenue forecasting.
 The CLV model was evaluated using decile analysis by ranking customers according to their predicted lifetime value and comparing the mean predicted CLV with the mean actual CLV within each decile. The model successfully separates lower-value from higher-value customers, with the highest predicted decile capturing customers with substantially greater realized lifetime value. The close agreement between predicted and actual CLV across most deciles indicates that the model effectively captures customer-value ranking.
 
 <p align="center">
-  <img src="images/clv_decile_analysis.png" width="850">
+  <img src="images/clv_decile_analysis.png" width="595">
 </p>
 
 *Figure: Mean actual and predicted customer lifetime value across predicted CLV deciles.*
@@ -196,25 +210,40 @@ The recommendation evaluation considers three tasks:
 The notebook evaluates recommendations using ranking metrics such as
 Precision@k, Recall@k, MAP@k, and NDCG@k.
 
+The final LightGBM stage is trained twice: one ranker for all customer-product
+pairs, and a second ranker trained only on products the customer has not bought
+before, which targets the new-product and new-catalogue tasks.
+
+The sentence-transformer embeddings (`all-MiniLM-L6-v2`), the two-tower training
+and the two-tower recommendation scoring run on the GPU when CUDA is available;
+the notebook prints the device it selected. On an NVIDIA GeForce RTX 3080 the full
+notebook takes about 30 minutes. See [GPU Support](#gpu-support-optional).
+
 ## Dependencies
 
 The notebooks use Python and common data science libraries, including:
 
 - `pandas`
 - `numpy`
+- `pyarrow`
+- `openpyxl`
 - `matplotlib`
 - `seaborn`
 - `scikit-learn`
 - `scipy`
+- `lifetimes`
 - `pymc`
 - `pymc-marketing`
 - `arviz`
+- `nltk`
 - `sentence-transformers`
-- `torch`
+- `torch` (CUDA build on Windows and Linux; see [GPU Support](#gpu-support-optional))
+- `tensorflow`
 - `lightgbm`
 - `implicit`
 - `mlxtend`
 - `tqdm`
+- `jupyter`
 
 Python and Python-package dependencies are managed with **uv**. The project uses
 `pyproject.toml` to declare dependencies, `uv.lock` to record resolved versions,
@@ -225,6 +254,27 @@ install the locked packages. See the [uv documentation](https://docs.astral.sh/u
 System-level prerequisites are **Git**, **uv**, and a **C++ compiler** for normal
 PyMC/PyTensor compiled execution. These tools must be installed separately;
 `uv.lock` manages Python packages, not operating-system tools.
+
+### GPU Support (optional)
+
+An NVIDIA GPU is optional but speeds up `04_product_reco.ipynb`. On Windows and
+Linux, `pyproject.toml` installs PyTorch (`torch`, `torchvision`, `torchaudio`)
+from the PyTorch **CUDA 13.0** wheel index (`cu130`), so `uv sync` downloads the
+CUDA build automatically; the CUDA runtime ships inside the wheels and no
+separate CUDA Toolkit install is needed. You only need an NVIDIA GPU with a
+current driver that supports CUDA 13.0 (driver 580 or newer). macOS installs the
+standard PyTorch build and runs on the CPU.
+
+The notebook selects the device automatically (`cuda` if available, otherwise
+`cpu`), so the workflow also runs without a GPU, only more slowly. To check that
+PyTorch sees your GPU, run from inside `customer-clv`:
+
+```powershell
+uv run python -c "import torch; print(torch.cuda.is_available())"
+```
+
+If this prints `False` on a machine with an NVIDIA GPU, update the NVIDIA driver
+and run `uv sync` again.
 
 ### Windows Setup
 
@@ -354,3 +404,84 @@ for the notebook dependencies and purposes.
   especially repeat purchases, new-to-customer discovery, and new-catalog
   recommendations.
 
+## Agentic Product Recommendation Chatbot
+
+The second part of the project puts the recommendation models behind a chat
+interface, so a shopper can ask for products in plain language and get a short
+list of suggestions.
+
+<p align="center">
+  <img src="images/chatbot_screenshot.png" width="595">
+</p>
+
+*Figure: The Streamlit chatbot for one customer (a product explorer with 24
+previously purchased products). The assistant asks short follow-up questions and
+then recommends five products.*
+
+In the screenshot, the shopper starts with a vague request ("I wanna buy a gift").
+The assistant asks who the gift is for, learns that it is for a baby's birthday,
+asks for the baby's age, and, once the shopper answers "Toddler", recommends five
+products. Each recommendation shows the product name, stock code, historical
+average price and a one-line reason, ending with a reminder that prices are
+historical averages, not live prices. The sidebar shows the selected customer and
+their shopping style, which the agent uses to decide whether to favor familiar or
+new products. The follow-up answers work because earlier messages are passed back
+to the agent as conversation history.
+
+The part is split into three scripts that are run in this order:
+
+| Script | Role |
+| --- | --- |
+| `a_prep_reco_data.py` | Runs the modeling offline. It reproduces the data preparation and the recommendation models from the notebooks, assigns each customer a shopping style (infrequent shopper, repeat shopper or product explorer), trains the two-tower model on all calibration customers (on the GPU when available), and saves per-customer rank tables to `data/working_data/`. |
+| `b_recommendation_agent.py` | The agent. It reads the saved rankings and answers one request for one customer. It can also be run directly from the command line. |
+| `c_app.py` | A Streamlit chat page that shows the conversation, lets you pick a customer, and passes the previous messages to the agent. It contains no recommendation logic. |
+
+### How the agent works
+
+The agent is a LangGraph pipeline in which the language model never chooses
+products. It only reads the request and writes the reply:
+
+1. **Understand the request.** The language model turns the message, together
+   with the conversation history, into a structured request: whether the customer
+   wants to buy again or try something new, price limits, how many products, a
+   short description of the product wanted, and anything to exclude. If a request
+   is too broad it returns one short clarifying question instead.
+2. **Choose the ranking.** Plain code picks the saved ranking that fits: the
+   repeat-purchase ranking for buy-again requests and the two-tower ranking
+   otherwise. When the customer states no preference, their shopping style only
+   decides which products come first.
+3. **Apply constraints.** Plain code removes products that break the request:
+   price range, previously purchased or not, newly added to the catalogue, and
+   exclusions. If a product description was given, products are kept when their
+   description is close in meaning to it, measured with text embeddings rather
+   than exact word matches. The best-ranked products that remain are selected.
+4. **Explain.** The language model writes a friendly reason for each selected
+   product, and the reply is rejected if it adds or drops a product. If no
+   product survives, the reply says which kind of constraint caused it, for
+   example the price range, instead of returning a generic message.
+
+### Running the chatbot
+
+The chatbot needs an OpenAI API key. Create a `.env` file in `customer-clv`
+containing `OPENAI_API_KEY=...`. `RECOMMENDATION_MODEL` and `EMBEDDING_MODEL` can
+optionally be set to change the chat and embedding models.
+
+From inside `customer-clv`, after `uv sync`:
+
+```powershell
+uv run python a_prep_reco_data.py
+uv run streamlit run c_app.py
+```
+
+`a_prep_reco_data.py` creates its output files only once and skips any that
+already exist, but its first run trains the models and takes a while. The first
+chatbot request after it also computes embeddings for the product descriptions and
+caches them in `data/working_data/catalog_embeddings.npz`. To try the agent
+without the web page:
+
+```powershell
+uv run python b_recommendation_agent.py --customer-id 12347 --query "Something new under £5"
+```
+
+The chatbot's answers are generated with a language model, so the exact wording
+can differ from the screenshot.
